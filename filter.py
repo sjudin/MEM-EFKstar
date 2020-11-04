@@ -3,6 +3,11 @@ import datagen
 from datagen import sigmaEllipse2D
 import matplotlib
 import matplotlib.pyplot as plt
+import sys
+from copy import copy
+
+DEBUG = False
+DEBUG_get_auxiliary_variables = False
 
 
 def predict(r, Cr, p, Cp, Ar, Ap, Cwr, Cwp):
@@ -31,16 +36,17 @@ def update(z, r_pred, Cr_pred, p_pred, Cp_pred, Cv, Ch):
     F = np.array([[1, 0, 0, 0], [0, 0, 0, 1], [0, 1, 0, 0]])
     Ftilde = np.array([[1, 0, 0, 0], [0, 0, 0, 1], [0, 0, 1, 0]])
 
-    r = r_pred
-    Cr = Cr_pred
+    r = copy(r_pred)
+    Cr = copy(Cr_pred)
 
-    p = p_pred
-    Cp = Cp_pred
+    p = copy(p_pred)
+    Cp = copy(Cp_pred)
 
     # Go through all measurements
-    for y in z:
+    for i, y in enumerate(z):
         CI, CII, M = get_auxiliary_variables(p, Cp, Ch)
 
+        # Predicted measurement
         ybar = H@r
 
         # Calculate moments for the kinematic state update
@@ -56,15 +62,32 @@ def update(z, r_pred, Cr_pred, p_pred, Cp_pred, Cv, Ch):
         # Construct pseudo-measurement
         Y = F@np.kron(y-ybar, y-ybar)
         # Calculate moment for the shape update
-        Ybar = F@Cy.flatten()
+        Ybar = F@Cy.flatten('C')
+        # Ybar = F@Cy.flatten('F')
+
         CpY = Cp@M.T
+        # CpY = np.eye(3)
         CY = F@np.kron(Cy, Cy)@(F + Ftilde).T
 
         # Update shape
         p = p + CpY@np.linalg.inv(CY)@(Y-Ybar)
         Cp = Cp - CpY@np.linalg.inv(CY)@CpY.T
 
+
+        # Enforce symmetry of the covariance
         Cp = (Cp+Cp.T)/2
+
+        if DEBUG:
+            print(f"M: \n{M}")
+            print(f"Y: \n{Y}")
+            print(f"Ybar: \n{Ybar}")
+            print(f"CpY: \n{CpY}")
+            print(f"CY: \n{CY}")
+            print(f"p: \n{p}")
+            print(f"Cp: \n{Cp}")
+            print("\n\n\n")
+        # if i > 5:
+        #     sys.exit()
 
     return r, Cr, p, Cp
         
@@ -92,6 +115,14 @@ def get_auxiliary_variables(p, Cp, Ch):
 
     M = np.array([2*S1@Ch@J1, 2*S2@Ch@J2, S1@Ch@J2 + S2@Ch@J1])
 
+    if DEBUG_get_auxiliary_variables:
+        print(f"S1: \n{S1}")
+        print(f"S2: \n{S2}")
+        print(f"J1: \n{J1}")
+        print(f"J2: \n{J2}")
+        print(f"M: \n{M}")
+        print("\n\n\n")
+
     return CI, CII, M
 
 
@@ -100,23 +131,23 @@ if __name__ == '__main__':
     # Covariance of multiplicative noise
     Ch = np.diag([1/4, 1/4])
     # Covariance of measurement noise
-    Cv = np.diag([10, 10])
+    Cv = np.diag([1, 1])
     # Covariance for the process noise of the kinematic state
-    Cwr = np.diag([1, 1, 0.1, 0.1])
+    Cwr = np.diag([1, 1, 1, 1])
     # Covariance for the process noise of the shape parameters
-    Cwp = np.diag([0.5, 10, 10])
+    Cwp = np.diag([1, 1, 1])
 
     # Prior
     r = np.array([0, 0, 0, 0])
     p = np.array([-np.pi/3, 3, 3])
 
     Cr = np.diag([1, 1, 1, 1])
-    Cp = np.diag([0.2, 400, 400])
+    Cp = np.diag([0.5, 10, 10])
 
-    Ar = np.array([[1, 0, 10, 0], 
-                   [0, 1, 0,  10],
-                   [0, 0, 1,  0],
-                   [0, 0, 0,  1]])
+    Ar = np.array([[1, 0, 1, 0], 
+                   [0, 1, 0, 1],
+                   [0, 0, 1, 0],
+                   [0, 0, 0, 1]])
     Ap = np.eye(3)
 
     states, extents, Z = datagen.generate_scenario()
@@ -132,21 +163,27 @@ if __name__ == '__main__':
     plt.scatter([state[0] for state in states], [state[1]for state in states])
 
     for k in range(K):
-        print(k)
-        # Predict
-        r, Cr, p, Cp = predict(r, Cr, p, Cp, Ar, Ap, Cwr, Cwp)
 
         # Update
         r, Cr, p, Cp = update(Z[k], r, Cr, p, Cp, Cv, Ch)
 
         estimates.append((r, p))
-        plt.scatter([r[0]], [r[1]])
 
-        ext = np.diag([p[1], p[2]])
+
+        ext = np.abs(np.diag([p[1], p[2]]))
         ext = R(p[0])@ext@R(p[0]).T
         xy = sigmaEllipse2D(r[0:2], ext)
-        plt.scatter(Z[k][:,0], Z[k][:,1])
-        # plt.plot(xy[0,:], xy[1,:])
+        # plt.scatter(Z[k][:,0], Z[k][:,1])
+        # plt.scatter([r[0]], [r[1]])
+        print(f"alpha: {p[0]}, l1: {p[1]}, l2: {p[2]}")
+        plt.plot(xy[0,:], xy[1,:])
+        # gt_ext = sigmaEllipse2D(np.array([states[k][0], states[k][1]]), extents[k])
+        # plt.plot(gt_ext[0,:], gt_ext[1,:])
+        plt.pause(0.1)
 
+        # Predict
+        r, Cr, p, Cp = predict(r, Cr, p, Cp, Ar, Ap, Cwr, Cwp)
+
+    plt.axis('equal')
     plt.show()
 

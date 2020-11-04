@@ -68,8 +68,8 @@ def generate_scenario():
     a_traj = np.zeros(100)
     a_traj[0:5] = 0.5
     w_traj = np.zeros(100)
-    w_traj[0:10] = 0.08
-    w_traj[11:21] = -0.08
+    w_traj[0:10] = 0.01
+    w_traj[11:21] = -0.01
 
     states = generate_kinematic_state(a_traj, w_traj)
 
